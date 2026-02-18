@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Help Nuri Avoid Walking</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0b0b10">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <style>
+    html, body {
+      margin:0; padding:0; height:100%;
+      background:#0b0b10; overflow:hidden;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    canvas { width:100%; height:100%; display:block; }
+    .hint{
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: calc(16px + env(safe-area-inset-bottom));
+      color: rgba(255,255,255,.92);
+      background: rgba(0,0,0,.45);
+      padding: 10px 12px; border-radius: 999px;
+      font-size: 14px; user-select:none; pointer-events:none;
+      max-width: 92vw; text-align:center;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div class="hint">Tap once to enable sound 🎵 • Tap to advance dialogues • Match fruits to unlock rickshaw 🚲</div>
+
+<script>
+(() => {
+  // PWA service worker (offline + install)
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    });
+  }
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  function resize() {
+    const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+    canvas.width = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---- Settings
+  const GAME_NAME = "Help Nuri Avoid Walking";
+  const UNIVERSITY_NAME = "United International University";
+
+  const MOVE_LIMIT = 14;
+  const WALK_TIME_SECONDS = 30;
+
+  const MISMATCH_STAMINA_PENALTY = 0.10;
+  const GRAPE_STAMINA_BOOST = 0.06;
+
+  // ---- Images (same folder)
+  const nuriImg = new Image(); nuriImg.src = "nuri.png";
+  const meImg   = new Image(); meImg.src   = "me.png";
+
+  // ---- Sound
+  let audioCtx = null;
+  let soundEnabled = false;
+
+  function initAudio() {
+    if (soundEnabled) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      soundEnabled = true;
+      sfxBlip(660, 0.05, 0.05);
+      setTimeout(() => sfxBlip(880, 0.06, 0.05), 70);
+    } catch (_) {}
+  }
+
+  function sfxBlip(freq=600, dur=0.08, vol=0.08, type='sine') {
+    if (!soundEnabled || !audioCtx) return;
+    const t = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+
+  function sfxFlip(){ sfxBlip(740, 0.04, 0.05); }
+  function sfxMatch(){ sfxBlip(920, 0.06, 0.07); }
+  function sfxMismatch(){ sfxBlip(260, 0.10, 0.07, 'triangle'); }
+  function sfxWin(){
+    sfxBlip(523, 0.08, 0.08);
+    setTimeout(() => sfxBlip(659, 0.08, 0.08), 90);
+    setTimeout(() => sfxBlip(784, 0.10, 0.09), 180);
+    setTimeout(() => sfxBlip(1046, 0.12, 0.10), 280);
+  }
+  function sfxGrape(){
+    sfxBlip(660, 0.05, 0.06);
+    setTimeout(() => sfxBlip(1320, 0.06, 0.07), 70);
+  }
+
+  function sfxBellCring(){
+    sfxBlip(1800, 0.05, 0.06, 'sine');
+    setTimeout(() => sfxBlip(2200, 0.06, 0.06, 'sine'), 70);
+    setTimeout(() => sfxBlip(1800, 0.05, 0.05, 'sine'), 150);
+  }
+
+  function sfxEvilLaughEcho(){
+    if (!soundEnabled || !audioCtx) return;
+
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sawtooth';
+
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.0001, t0);
+
+    const delay = audioCtx.createDelay(1.0);
+    delay.delayTime.setValueAtTime(0.18, t0);
+
+    const feedback = audioCtx.createGain();
+    feedback.gain.setValueAtTime(0.45, t0);
+
+    const wet = audioCtx.createGain();
+    wet.gain.setValueAtTime(0.35, t0);
+
+    const dry = audioCtx.createGain();
+    dry.gain.setValueAtTime(0.55, t0);
+
+    delay.connect(feedback);
+    feedback.connect(delay);
+
+    osc.connect(gain);
+    gain.connect(dry);
+    gain.connect(delay);
+    delay.connect(wet);
+
+    dry.connect(audioCtx.destination);
+    wet.connect(audioCtx.destination);
+
+    osc.frequency.setValueAtTime(280, t0);
+    osc.frequency.exponentialRampToValueAtTime(210, t0 + 0.12);
+    osc.frequency.setValueAtTime(300, t0 + 0.16);
+    osc.frequency.exponentialRampToValueAtTime(220, t0 + 0.28);
+    osc.frequency.setValueAtTime(320, t0 + 0.32);
+    osc.frequency.exponentialRampToValueAtTime(240, t0 + 0.46);
+
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.10, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.60);
+
+    osc.start(t0);
+    osc.stop(t0 + 0.65);
+  }
+
+  // Fullscreen helper (Android works; iPhone usually ignores)
+  function tryFullscreen() {
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (req) { try { req.call(el); } catch(_) {} }
+  }
+
+  // ---- Helpers
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+  function roundedRect(x,y,w,h,r){
+    r = Math.max(0, Math.min(r, Math.min(w,h)/2));
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function getSheetRect(img) {
+    const fw = img.width / 3;
+    const fh = img.height;
+    return { fw, fh };
+  }
+
+  function drawSprite(img, frameIndex, x, y, w, h) {
+    if (!img.complete || !img.naturalWidth) return;
+    const { fw, fh } = getSheetRect(img);
+    const sx = frameIndex * fw;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.drawImage(img, sx, 0, fw, fh, x, y, w, h);
+    ctx.restore();
+  }
+
+  // ---- Dialogue (tap-to-advance only)
+  const dialogue = { active:false, a:"", b:"", queue:[] };
+
+  function setDialogueQueue(lines){
+    dialogue.queue = lines.slice();
+    dialogue.active = true;
+    nextDialogue();
+  }
+  function nextDialogue(){
+    if (dialogue.queue.length === 0) {
+      dialogue.active = false;
+      dialogue.a = "";
+      dialogue.b = "";
+      return;
+    }
+    const d = dialogue.queue.shift();
+    dialogue.a = d.a;
+    dialogue.b = d.b;
+    dialogue.active = true;
+  }
+
+  // ---- Puzzle
+  const FRUITS = [
+    { key:"grape", emoji:"🍇" },
+    { key:"apple", emoji:"🍎" },
+    { key:"banana", emoji:"🍌" },
+    { key:"watermelon", emoji:"🍉" },
+    { key:"strawberry", emoji:"🍓" },
+    { key:"orange", emoji:"🍊" }
+  ];
+
+  function makeDeck() {
+    const cards = [];
+    for (const f of FRUITS) { cards.push({fruit:f}, {fruit:f}); }
+    for (let i = cards.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [cards[i], cards[j]] = [cards[j], cards[i]];
+    }
+    return cards.map((c, idx) => ({ id: idx, fruit: c.fruit, faceUp: false, matched: false }));
+  }
+
+  // ---- State
+  const state = {
+    mode: "title", // title -> intro -> walking -> puzzle -> rickshaw -> win -> lose
+    stamina: 1,
+    walkT: 0,
+    rickshawUnlocked: false,
+    rickshawBellPlayed: false,
+
+    evilMode: false,
+    evilUntil: 0,
+
+    puzzle: {
+      active: false,
+      movesLeft: MOVE_LIMIT,
+      deck: makeDeck(),
+      firstPick: null,
+      secondPick: null,
+      lock: false,
+      solved: false
+    }
+  };
+
+  function resetGameToTitle() {
+    state.mode = "title";
+    state.stamina = 1;
+    state.walkT = 0;
+    state.rickshawUnlocked = false;
+    state.rickshawBellPlayed = false;
+    state.evilMode = false;
+    state.evilUntil = 0;
+
+    state.puzzle.active = false;
+    state.puzzle.movesLeft = MOVE_LIMIT;
+    state.puzzle.deck = makeDeck();
+    state.puzzle.firstPick = null;
+    state.puzzle.secondPick = null;
+    state.puzzle.lock = false;
+    state.puzzle.solved = false;
+
+    dialogue.active = false;
+    dialogue.queue = [];
+    dialogue.a = "";
+    dialogue.b = "";
+  }
+
+  function startIntro() {
+    state.mode = "intro";
+    state.stamina = 1;
+    state.walkT = 0;
+
+    setDialogueQueue([
+      { a: "Nuri: How far is it?", b: "Sadith: Very near 😌" },
+      { a: "Nuri: I don’t want to walk…", b: "Sadith: Okay okay 😅" },
+      { a: "Nuri: Let’s take rickshaw!", b: "Sadith: Only if you win 😈" }
+    ]);
+  }
+
+  // ---- Input
+  canvas.addEventListener("pointerdown", (e) => {
+    initAudio();
+    tryFullscreen();
+
+    if (state.mode === "title") { startIntro(); return; }
+
+    if (dialogue.active) {
+      nextDialogue();
+      if (!dialogue.active && state.mode === "intro") state.mode = "walking";
+      return;
+    }
+
+    if (state.mode === "rickshaw") {
+      state.mode = "win";
+      setDialogueQueue([
+        { a: "Sadith: You won the game!", b: "Now take rickshaw 😌" },
+        { a: "Nuri: Now I’ll go home", b: "and eat goru." }
+      ]);
+      sfxWin();
+      return;
+    }
+
+    if (state.mode === "win" || state.mode === "lose") {
+      resetGameToTitle();
+      return;
+    }
+
+    if (state.mode === "puzzle") {
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      handlePuzzleTap(px, py);
+      return;
+    }
+  });
+
+  // ---- Drawing
+  function drawBackground() {
+    const W = innerWidth, H = innerHeight;
+    ctx.fillStyle = "#0b0b10";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.beginPath();
+    ctx.arc(W*0.78, H*0.22, Math.min(W,H)*0.28, 0, Math.PI*2);
+    ctx.fill();
+
+    const roadY = H*0.70;
+    ctx.fillStyle = "#1b1b22";
+    ctx.fillRect(0, roadY, W, H-roadY);
+
+    ctx.fillStyle = "#2a2a33";
+    ctx.fillRect(0, roadY-28, W, 28);
+
+    const speed = 160;
+    const effectiveT = (state.mode === "walking" || state.mode === "puzzle" || state.mode === "rickshaw" || state.mode === "win" || state.mode === "lose")
+      ? state.walkT : 0;
+    const offset = (effectiveT * speed) % 90;
+
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    for (let x = -offset; x < W; x += 90) ctx.fillRect(x, roadY + (H-roadY)*0.35, 46, 6);
+
+    drawUniversityGate();
+    drawTopLeftLabels();
+  }
+
+  function drawTopLeftLabels() {
+    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    ctx.font = "900 22px system-ui";
+    ctx.fillText(GAME_NAME, 18, 34);
+
+    ctx.fillStyle = "rgba(255,255,255,0.65)";
+    ctx.font = "700 12px system-ui";
+    ctx.fillText("Tap to advance dialogues", 18, 52);
+  }
+
+  function drawUniversityGate() {
+    const W = innerWidth, H = innerHeight;
+    const roadY = H*0.70;
+
+    const gateX = W * 0.76;
+    const gateY = roadY - 170;
+    const gateW = W * 0.20;
+    const gateH = 170;
+
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    roundedRect(gateX, gateY, gateW*0.22, gateH, 16); ctx.fill();
+    roundedRect(gateX + gateW*0.78, gateY, gateW*0.22, gateH, 16); ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.16)";
+    roundedRect(gateX + gateW*0.12, gateY, gateW*0.76, 48, 16); ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    ctx.font = "800 14px system-ui";
+    ctx.fillText("Welcome to", gateX + gateW*0.16, gateY + 20);
+    ctx.font = "900 14px system-ui";
+    ctx.fillText(UNIVERSITY_NAME, gateX + gateW*0.16, gateY + 38);
+  }
+
+  function drawStaminaBar() {
+    const W = innerWidth;
+    const x = 18, y = 62;
+    const w = Math.min(360, W * 0.52);
+    const h = 12;
+    const r = h / 2;
+
+    ctx.fillStyle = "rgba(255,255,255,0.14)";
+    roundedRect(x, y, w, h, r); ctx.fill();
+
+    ctx.fillStyle = "rgba(255,80,80,0.92)";
+    roundedRect(x, y, Math.max(0, w * state.stamina), h, r); ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.60)";
+    ctx.font = "700 11px system-ui";
+    ctx.fillText("Stamina", x, y - 6);
+  }
+
+  const drawCache = { sadithRect: null };
+
+  function drawCharacters() {
+    const W = innerWidth, H = innerHeight;
+    const roadY = H*0.70;
+
+    const bob = (state.mode === "walking")
+      ? Math.sin(performance.now()/110) * 5
+      : 0;
+
+    if (nuriImg.complete && nuriImg.naturalWidth) {
+      const { fw, fh } = getSheetRect(nuriImg);
+
+      let nFrame = 0;
+      if (state.mode === "win") nFrame = 2;
+      else if (state.stamina <= 0.35) nFrame = 1;
+
+      const drawH = Math.min(H*0.58, fh*0.55);
+      const drawW = (fw/fh) * drawH;
+      const x = W*0.28 - drawW/2;
+      const y = roadY - drawH + bob;
+      drawSprite(nuriImg, nFrame, x, y, drawW, drawH);
+    }
+
+    drawCache.sadithRect = null;
+    if (meImg.complete && meImg.naturalWidth) {
+      const { fw, fh } = getSheetRect(meImg);
+
+      let mFrame = 0;
+      if (state.evilMode || state.mode === "lose") mFrame = 2;
+      else if (state.mode === "intro" || dialogue.active) mFrame = 1;
+
+      const drawH = Math.min(H*0.52, fh*0.50);
+      const drawW = (fw/fh) * drawH;
+      const x = W*0.52 - drawW/2;
+      const y = roadY - drawH + (state.mode === "walking" ? -bob*0.6 : 0);
+
+      drawSprite(meImg, mFrame, x, y, drawW, drawH);
+      drawCache.sadithRect = { x, y, w: drawW, h: drawH };
+    }
+  }
+
+  function drawGlowingRedEyes() {
+    if (!state.evilMode) return;
+    if (!drawCache.sadithRect) return;
+
+    const r = drawCache.sadithRect;
+    const eye1 = { x: r.x + r.w*0.58, y: r.y + r.h*0.28 };
+    const eye2 = { x: r.x + r.w*0.70, y: r.y + r.h*0.28 };
+
+    const pulse = 0.6 + 0.4*Math.sin(performance.now()/90);
+    const glowR = Math.max(6, r.w * 0.032) * (1.0 + 0.45*pulse);
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+
+    function glowAt(p) {
+      const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowR*3.2);
+      grd.addColorStop(0, `rgba(255,0,0,${0.62 + 0.25*pulse})`);
+      grd.addColorStop(0.35, `rgba(255,0,0,${0.26 + 0.12*pulse})`);
+      grd.addColorStop(1, `rgba(255,0,0,0)`);
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, glowR*3.2, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.fillStyle = `rgba(255,40,40,0.9)`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, glowR*0.6, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    glowAt(eye1);
+    glowAt(eye2);
+    ctx.restore();
+  }
+
+  function drawDarkAura() {
+    if (!state.evilMode) return;
+
+    const now = performance.now();
+    if (state.mode !== "lose" && state.evilUntil && now > state.evilUntil) {
+      state.evilMode = false;
+      return;
+    }
+
+    const W = innerWidth, H = innerHeight;
+    const pulse = 0.5 + 0.5*Math.sin(now/160);
+
+    ctx.save();
+    ctx.fillStyle = `rgba(0,0,0,${0.32 + 0.18*pulse})`;
+    ctx.fillRect(0,0,W,H);
+
+    const cx = W*0.5, cy = H*0.5;
+    const maxR = Math.hypot(W, H) * 0.55;
+    const grd = ctx.createRadialGradient(cx, cy, maxR*0.18, cx, cy, maxR);
+    grd.addColorStop(0, `rgba(0,0,0,0)`);
+    grd.addColorStop(0.55, `rgba(0,0,0,${0.22 + 0.12*pulse})`);
+    grd.addColorStop(1, `rgba(0,0,0,${0.68 + 0.20*pulse})`);
+    ctx.fillStyle = grd;
+    ctx.fillRect(0,0,W,H);
+
+    ctx.globalCompositeOperation = "lighter";
+    const red = ctx.createRadialGradient(cx, cy, maxR*0.65, cx, cy, maxR);
+    red.addColorStop(0, `rgba(255,0,0,0)`);
+    red.addColorStop(0.8, `rgba(255,0,0,${0.08 + 0.06*pulse})`);
+    red.addColorStop(1, `rgba(255,0,0,${0.16 + 0.10*pulse})`);
+    ctx.fillStyle = red;
+    ctx.fillRect(0,0,W,H);
+
+    ctx.restore();
+  }
+
+  function drawRickshaw(x, y, s=1) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(70, 0, 16, 0, Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(70, 0, 8, 0, Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.14)";
+    roundedRect(-8, -38, 95, 30, 10); ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    roundedRect(20, -62, 55, 22, 10); ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.7)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(84, -40);
+    ctx.lineTo(110, -62);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = "900 16px system-ui";
+    ctx.fillText("🔔", 96, -66);
+
+    ctx.restore();
+  }
+
+  function drawRickshawOnRoad() {
+    const roadY = innerHeight*0.70;
+    drawRickshaw(innerWidth*0.78, roadY - 12, 1.0);
+  }
+
+  function drawDialogueBox() {
+    if (!dialogue.active) return;
+    const W = innerWidth, H = innerHeight;
+    const boxW = Math.min(640, W*0.92);
+
+    const x = Math.max(18, W*0.36);
+    const y = H*0.10;
+    const h = 120;
+
+    ctx.save();
+    ctx.globalAlpha = 0.96;
+    ctx.fillStyle = "rgba(0,0,0,0.50)";
+    roundedRect(x,y,boxW,h,18); ctx.fill();
+
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.font = "800 18px system-ui";
+    ctx.fillText(dialogue.a, x+18, y+40);
+
+    ctx.fillStyle = "rgba(255,255,255,0.86)";
+    ctx.font = "650 16px system-ui";
+    ctx.fillText(dialogue.b, x+18, y+76);
+
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.font = "650 13px system-ui";
+    ctx.fillText("Tap to continue…", x+18, y+106);
+    ctx.restore();
+  }
+
+  function drawTitleScreen() {
+    const W = innerWidth, H = innerHeight;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.40)";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle = "rgba(255,255,255,0.97)";
+    ctx.font = "900 46px system-ui";
+    ctx.fillText(GAME_NAME, W*0.08, H*0.32);
+
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = "800 18px system-ui";
+    ctx.fillText("Tap to start", W*0.08, H*0.38);
+
+    ctx.fillStyle = "rgba(255,255,255,0.65)";
+    ctx.font = "650 14px system-ui";
+    ctx.fillText("Goal: Unlock rickshaw before stamina ends.", W*0.08, H*0.42);
+
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.font = "650 12px system-ui";
+    ctx.fillText("(On mobile: tap once to enable sound + fullscreen)", W*0.08, H*0.46);
+    ctx.restore();
+  }
+
+  function drawRickshawPrompt() {
+    const W = innerWidth, H = innerHeight;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.38)";
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.font = "900 32px system-ui";
+    ctx.fillText("Rickshaw unlocked! 🚲", W*0.10, H*0.40);
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = "650 18px system-ui";
+    ctx.fillText("Tap anywhere to take rickshaw", W*0.10, H*0.45);
+    ctx.restore();
+  }
+
+  function drawEnd(kind) {
+    const W = innerWidth, H = innerHeight;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.font = "900 38px system-ui";
+    ctx.fillText(kind === "win" ? "YOU WIN 🎉" : "YOU LOST 😭", W*0.10, H*0.38);
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = "650 18px system-ui";
+    ctx.fillText("Tap to go to title", W*0.10, H*0.43);
+    ctx.restore();
+  }
+
+  function puzzleLayout() {
+    const W = innerWidth, H = innerHeight;
+
+    const panelW = Math.min(620, W*0.96);
+    const panelH = Math.min(620, H*0.68);
+    const panelX = (W - panelW)/2;
+    const panelY = H < 700 ? H*0.18 : H*0.20;
+
+    const cols = 4, rows = 3;
+    const gap = (W < 520) ? 12 : 10;
+    const cellW = (panelW - gap*(cols+1)) / cols;
+    const cellH = (panelH - gap*(rows+1)) / rows;
+
+    return { panelX, panelY, panelW, panelH, cols, rows, gap, cellW, cellH };
+  }
+
+  function drawPuzzle() {
+    const W = innerWidth, H = innerHeight;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.38)";
+    ctx.fillRect(0,0,W,H);
+
+    const L = puzzleLayout();
+    ctx.fillStyle = "rgba(0,0,0,0.48)";
+    roundedRect(L.panelX, L.panelY, L.panelW, L.panelH + 84, 22);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.font = "900 18px system-ui";
+    ctx.fillText("Match fruits to unlock rickshaw", L.panelX + 18, L.panelY + 30);
+
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.font = "750 14px system-ui";
+    ctx.fillText(`Moves left: ${state.puzzle.movesLeft}`, L.panelX + 18, L.panelY + 54);
+    ctx.fillText("Mismatch costs stamina", L.panelX + 190, L.panelY + 54);
+    ctx.fillText("🍇 gives a small boost", L.panelX + 380, L.panelY + 54);
+
+    const bigEmoji = innerWidth < 520 ? 32 : 28;
+
+    state.puzzle.deck.forEach((card, i) => {
+      const col = i % L.cols;
+      const row = Math.floor(i / L.cols);
+      const x = L.panelX + L.gap + col*(L.cellW + L.gap);
+      const y = L.panelY + 78 + L.gap + row*(L.cellH + L.gap);
+      const isUp = card.faceUp || card.matched;
+
+      ctx.fillStyle = isUp ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.10)";
+      roundedRect(x,y,L.cellW,L.cellH,16); ctx.fill();
+
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
+      ctx.lineWidth = 2; ctx.stroke();
+
+      ctx.textAlign = "center";
+
+      if (isUp && !card.matched) {
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.font = `900 ${bigEmoji}px system-ui`;
+        ctx.fillText(card.fruit.emoji, x + L.cellW/2, y + L.cellH/2 + 12);
+      } else if (!isUp) {
+        ctx.fillStyle = "rgba(255,255,255,0.22)";
+        ctx.font = "900 20px system-ui";
+        ctx.fillText("?", x + L.cellW/2, y + L.cellH/2 + 8);
+      }
+
+      ctx.textAlign = "left";
+    });
+
+    ctx.restore();
+  }
+
+  function cardAtPoint(px, py) {
+    const L = puzzleLayout();
+    for (let i = 0; i < state.puzzle.deck.length; i++) {
+      const col = i % L.cols;
+      const row = Math.floor(i / L.cols);
+      const x = L.panelX + L.gap + col*(L.cellW + L.gap);
+      const y = L.panelY + 78 + L.gap + row*(L.cellH + L.gap);
+      if (px >= x && px <= x + L.cellW && py >= y && py <= y + L.cellH) return i;
+    }
+    return null;
+  }
+
+  function handlePuzzleTap(px, py) {
+    const p = state.puzzle;
+    if (p.lock) return;
+
+    const idx = cardAtPoint(px, py);
+    if (idx === null) return;
+
+    const card = p.deck[idx];
+    if (card.matched || card.faceUp) return;
+
+    card.faceUp = true;
+    sfxFlip();
+
+    if (p.firstPick === null) { p.firstPick = idx; return; }
+
+    if (p.secondPick === null) {
+      p.secondPick = idx;
+      p.movesLeft -= 1;
+      p.lock = true;
+
+      setTimeout(() => {
+        const a = p.deck[p.firstPick];
+        const b = p.deck[p.secondPick];
+        const isMatch = a.fruit.key === b.fruit.key;
+
+        if (isMatch) {
+          a.matched = true; b.matched = true;
+          a.faceUp = false; b.faceUp = false;
+          sfxMatch();
+
+          if (a.fruit.key === "grape") {
+            state.stamina = clamp(state.stamina + GRAPE_STAMINA_BOOST, 0, 1);
+            sfxGrape();
+          }
+
+          if (p.deck.every(c => c.matched)) {
+            p.solved = true;
+            state.rickshawUnlocked = true;
+
+            if (!state.rickshawBellPlayed) {
+              sfxBellCring();
+              state.rickshawBellPlayed = true;
+            }
+
+            state.mode = "rickshaw";
+          }
+        } else {
+          a.faceUp = false; b.faceUp = false;
+          state.stamina = clamp(state.stamina - MISMATCH_STAMINA_PENALTY, 0, 1);
+          sfxMismatch();
+        }
+
+        p.firstPick = null;
+        p.secondPick = null;
+        p.lock = false;
+
+        if (!p.solved && (p.movesLeft <= 0 || state.stamina <= 0)) {
+          state.mode = "lose";
+          state.evilMode = true;
+          state.evilUntil = performance.now() + 3500;
+          sfxEvilLaughEcho();
+          setDialogueQueue([
+            { a: "Sadith: Hahaha 😈", b: "" },
+            { a: "Sadith: Now you have to walk.", b: "" }
+          ]);
+        }
+      }, 450);
+    }
+  }
+
+  // ---- Main loop
+  resetGameToTitle();
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+
+    if (state.mode === "walking") {
+      state.walkT += dt;
+      state.stamina = clamp(1 - (state.walkT / WALK_TIME_SECONDS), 0, 1);
+
+      if (state.stamina <= 0.70 && !state.puzzle.active) {
+        state.mode = "puzzle";
+        state.puzzle.active = true;
+        setDialogueQueue([
+          { a: "Nuri: Let’s take rickshaw!", b: "Sadith: Win the puzzle first 😌" }
+        ]);
+      }
+
+      if (state.stamina <= 0) {
+        state.mode = "lose";
+        state.evilMode = true;
+        state.evilUntil = performance.now() + 3500;
+        sfxEvilLaughEcho();
+        setDialogueQueue([
+          { a: "Sadith: Hahaha 😈", b: "" },
+          { a: "Sadith: Now you have to walk.", b: "" }
+        ]);
+      }
+    }
+
+    drawBackground();
+    drawCharacters();
+
+    if (state.rickshawUnlocked && (state.mode === "rickshaw" || state.mode === "win" || state.mode === "lose")) {
+      drawRickshawOnRoad();
+    }
+
+    if (state.mode !== "title") drawStaminaBar();
+
+    if (state.mode === "title") drawTitleScreen();
+    if (state.mode === "puzzle") drawPuzzle();
+    if (state.mode === "rickshaw") drawRickshawPrompt();
+    if (state.mode === "win") drawEnd("win");
+    if (state.mode === "lose") drawEnd("lose");
+
+    drawDarkAura();
+    drawGlowingRedEyes();
+    drawDialogueBox();
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
