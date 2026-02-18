@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Help Nuri Avoid Walking</title>
+
+  <style>
+    :root{
+      --bg:#0b0b10;
+      --panel: rgba(0,0,0,.62);
+      --text: rgba(255,255,255,.94);
+      --muted: rgba(255,255,255,.70);
+      --danger: rgba(255,80,80,.95);
+      --barbg: rgba(255,255,255,.14);
+      --card: rgba(255,255,255,.10);
+      --cardUp: rgba(255,255,255,.16);
+      --stroke: rgba(255,255,255,.18);
+    }
+
+    *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+    html,body{ margin:0; height:100%; background:var(--bg); overflow:hidden; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+
+    /* Main stage */
+    #stage{
+      position:fixed; inset:0;
+      background: radial-gradient(circle at 78% 18%, rgba(255,255,255,.06) 0 28vmin, transparent 29vmin),
+                  linear-gradient(#0b0b10, #0b0b10);
+    }
+
+    /* Road */
+    #road{
+      position:absolute; left:0; right:0; bottom:0;
+      height: 28vh;
+      background: #1b1b22;
+      border-top: 24px solid rgba(255,255,255,.08);
+      overflow:hidden;
+    }
+    #dashes{
+      position:absolute; left:0; right:0;
+      top: 45%;
+      height: 6px;
+      background: repeating-linear-gradient(90deg, rgba(255,255,255,.22) 0 52px, transparent 52px 98px);
+      opacity:.9;
+      transform: translateX(0);
+    }
+
+    /* Top UI */
+    #uiTop{
+      position:fixed;
+      top: calc(14px + env(safe-area-inset-top));
+      left: 14px;
+      right: 14px;
+      z-index: 50;
+      pointer-events:none;
+    }
+    #title{
+      color:var(--text);
+      font-weight: 900;
+      letter-spacing:.2px;
+      line-height:1.05;
+      font-size: clamp(20px, 6vw, 40px);
+      text-shadow: 0 10px 30px rgba(0,0,0,.55);
+      margin:0 0 10px 0;
+    }
+    #barWrap{ width: min(520px, 92vw); }
+    #barLabel{ color:var(--muted); font-weight:800; font-size:12px; margin:0 0 6px 0; }
+    #bar{
+      height: 12px;
+      background: var(--barbg);
+      border-radius: 999px;
+      overflow:hidden;
+    }
+    #barFill{
+      height:100%;
+      width:100%;
+      background: var(--danger);
+      border-radius: 999px;
+      transition: width .15s linear;
+    }
+
+    /* Characters */
+    #chars{
+      position:absolute; inset:0;
+      pointer-events:none;
+      z-index: 20;
+    }
+    .char{
+      position:absolute;
+      bottom: 18vh; /* sits above road */
+      width: 44vw;
+      max-width: 260px;
+      min-width: 150px;
+      aspect-ratio: 1 / 1;
+      filter: drop-shadow(0 18px 35px rgba(0,0,0,.55));
+      transform-origin: 50% 100%;
+      opacity: 1;
+    }
+    #nuri{
+      left: 6vw;
+      animation: bob 1.15s ease-in-out infinite;
+    }
+    #sadith{
+      right: 6vw;
+      animation: bob2 1.25s ease-in-out infinite;
+    }
+
+    /* Use sprite sheets (3 frames). We show frame by background-position */
+    .sprite{
+      width:100%; height:100%;
+      background-repeat:no-repeat;
+      background-size: 300% 100%;
+      image-rendering: auto;
+    }
+
+    @keyframes bob{ 0%,100%{ transform: translateY(0); } 50%{ transform: translateY(-6px); } }
+    @keyframes bob2{ 0%,100%{ transform: translateY(0); } 50%{ transform: translateY(-4px); } }
+
+    /* Dialogue */
+    #dialogue{
+      position:fixed;
+      left:50%;
+      transform: translateX(-50%);
+      top: calc(86px + env(safe-area-inset-top));
+      width: min(600px, 92vw);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 18px;
+      padding: 12px 14px;
+      z-index: 60;
+      box-shadow: 0 18px 60px rgba(0,0,0,.45);
+      display:none;
+      pointer-events:none;
+      text-align:center;
+    }
+    #dLine1{ font-weight: 900; font-size: 18px; }
+    #dLine2{ margin-top: 8px; font-weight: 800; font-size: 16px; color: rgba(255,255,255,.88); }
+    #dHint{ margin-top: 10px; font-size: 12px; font-weight: 700; color: rgba(255,255,255,.60); }
+
+    /* Bottom hint */
+    #hint{
+      position:fixed;
+      left:50%;
+      transform: translateX(-50%);
+      bottom: calc(12px + env(safe-area-inset-bottom));
+      width: min(560px, 92vw);
+      background: rgba(0,0,0,.55);
+      color: rgba(255,255,255,.92);
+      border-radius: 18px;
+      padding: 10px 12px;
+      font-size: 12.5px;
+      font-weight: 750;
+      text-align:center;
+      z-index: 55;
+      pointer-events:none;
+      line-height:1.25;
+    }
+
+    /* Puzzle overlay (HTML buttons = perfect touch) */
+    #puzzleOverlay{
+      position:fixed; inset:0;
+      background: rgba(0,0,0,.45);
+      z-index: 80;
+      display:none;
+    }
+    #puzzlePanel{
+      position:absolute;
+      left:50%; transform:translateX(-50%);
+      top: 22vh;
+      width: min(520px, 94vw);
+      background: rgba(0,0,0,.66);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 22px;
+      padding: 14px;
+      box-shadow: 0 22px 70px rgba(0,0,0,.55);
+    }
+    #pTitle{ color:var(--text); font-weight: 900; font-size: 16px; }
+    #pMeta{ margin-top: 6px; color: rgba(255,255,255,.78); font-weight: 800; font-size: 13px; display:flex; gap:12px; flex-wrap:wrap; }
+    #grid{
+      margin-top: 12px;
+      display:grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    .tile{
+      appearance:none;
+      border:none;
+      background: var(--card);
+      border: 2px solid var(--stroke);
+      border-radius: 16px;
+      height: 64px;
+      font-size: 28px;
+      font-weight: 900;
+      color: rgba(255,255,255,.95);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      user-select:none;
+      touch-action: manipulation;
+    }
+    .tile.up{ background: var(--cardUp); }
+    .tile.matched{
+      background: rgba(120,255,160,.14);
+      border-color: rgba(120,255,160,.22);
+      opacity: .95;
+    }
+
+    /* Rickshaw prompt */
+    #rickshawPrompt{
+      position:fixed; inset:0;
+      background: rgba(0,0,0,.45);
+      display:none;
+      z-index: 85;
+    }
+    #rBox{
+      position:absolute; left:50%; transform:translateX(-50%);
+      top: 30vh;
+      width: min(520px, 92vw);
+      background: rgba(0,0,0,.70);
+      color: var(--text);
+      border-radius: 22px;
+      padding: 16px;
+      text-align:center;
+      box-shadow: 0 22px 70px rgba(0,0,0,.55);
+    }
+    #rBox .h{ font-size: 20px; font-weight: 950; }
+    #rBox .s{ margin-top: 8px; color: rgba(255,255,255,.82); font-weight: 800; }
+
+    /* Evil overlay */
+    #evil{
+      position:fixed; inset:0;
+      display:none;
+      z-index: 90;
+      pointer-events:none;
+      background: radial-gradient(circle at 70% 30%, rgba(255,0,0,.14), transparent 55%),
+                  rgba(0,0,0,.38);
+      mix-blend-mode: normal;
+    }
+    /* Red eyes effect on Sadith */
+    #sadith.evil{
+      filter: drop-shadow(0 18px 35px rgba(0,0,0,.55)) drop-shadow(0 0 24px rgba(255,0,0,.55));
+    }
+    #eyes{
+      position:absolute;
+      display:none;
+      right: 6vw;
+      bottom: 18vh;
+      width: 44vw;
+      max-width: 260px;
+      min-width: 150px;
+      aspect-ratio: 1 / 1;
+      z-index: 95;
+      pointer-events:none;
+    }
+    .eye{
+      position:absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: rgba(255,50,50,.95);
+      box-shadow: 0 0 18px rgba(255,0,0,.85), 0 0 34px rgba(255,0,0,.55);
+      opacity: .95;
+      animation: pulse .22s ease-in-out infinite alternate;
+    }
+    /* Approx eye positions inside the sprite box */
+    #eye1{ left: 46%; top: 31%; }
+    #eye2{ left: 62%; top: 31%; }
+    @keyframes pulse{ from{ transform: scale(1); } to{ transform: scale(1.18); } }
+
+    /* Make sure nothing overlaps weirdly on very small phones */
+    @media (max-height: 700px){
+      #dialogue{ top: calc(72px + env(safe-area-inset-top)); }
+      .tile{ height: 58px; font-size: 26px; }
+      #puzzlePanel{ top: 20vh; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="stage">
+    <div id="chars">
+      <div class="char" id="nuri"><div class="sprite" id="nuriSprite"></div></div>
+      <div class="char" id="sadith"><div class="sprite" id="sadithSprite"></div></div>
+      <div id="eyes">
+        <div class="eye" id="eye1"></div>
+        <div class="eye" id="eye2"></div>
+      </div>
+    </div>
+
+    <div id="road"><div id="dashes"></div></div>
+  </div>
+
+  <div id="uiTop">
+    <div id="title">Help Nuri Avoid Walking</div>
+    <div id="barWrap">
+      <div id="barLabel">Stamina</div>
+      <div id="bar"><div id="barFill"></div></div>
+    </div>
+  </div>
+
+  <div id="dialogue">
+    <div id="dLine1"></div>
+    <div id="dLine2"></div>
+    <div id="dHint">Tap anywhere to continue…</div>
+  </div>
+
+  <div id="hint">Tap once to enable sound 🎵 • Tap to advance dialogues • Match fruits to unlock rickshaw 🚲</div>
+
+  <div id="puzzleOverlay">
+    <div id="puzzlePanel">
+      <div id="pTitle">Match fruits to unlock rickshaw 🚲</div>
+      <div id="pMeta">
+        <div id="movesText">Moves left: 14</div>
+        <div>🍇 gives stamina boost</div>
+      </div>
+      <div id="grid"></div>
+    </div>
+  </div>
+
+  <div id="rickshawPrompt">
+    <div id="rBox">
+      <div class="h">Rickshaw unlocked! 🔔🚲</div>
+      <div class="s">Tap anywhere to take rickshaw</div>
+    </div>
+  </div>
+
+  <div id="evil"></div>
+
+<script>
+(() => {
+  // ---------- SETTINGS ----------
+  const WALK_SECONDS = 30;           // stamina drains over this time
+  const START_PUZZLE_AT = 0.72;      // when stamina goes below this, puzzle starts
+  const MOVE_LIMIT = 14;
+  const MISMATCH_PENALTY = 0.10;
+  const GRAPE_BOOST = 0.06;
+
+  // ---------- DOM ----------
+  const barFill = document.getElementById("barFill");
+  const dialogue = document.getElementById("dialogue");
+  const d1 = document.getElementById("dLine1");
+  const d2 = document.getElementById("dLine2");
+
+  const hint = document.getElementById("hint");
+  const puzzleOverlay = document.getElementById("puzzleOverlay");
+  const grid = document.getElementById("grid");
+  const movesText = document.getElementById("movesText");
+
+  const rPrompt = document.getElementById("rickshawPrompt");
+  const evil = document.getElementById("evil");
+  const eyes = document.getElementById("eyes");
+
+  const nuriSprite = document.getElementById("nuriSprite");
+  const sadithSprite = document.getElementById("sadithSprite");
+  const sadithChar = document.getElementById("sadith");
+
+  // Sprite sheets (3 frames)
+  // Your files: nuri.png, me.png
+  nuriSprite.style.backgroundImage = "url('nuri.png')";
+  sadithSprite.style.backgroundImage = "url('me.png')";
+
+  function setSpriteFrame(which, frameIndex){
+    // 0,1,2 across 3 frames
+    const pct = -(frameIndex * 100);
+    which.style.backgroundPosition = pct + "% 0%";
+  }
+
+  // ---------- AUDIO (simple WebAudio sfx) ----------
+  let audioCtx = null, soundEnabled = false;
+  function ensureAudio(){
+    if (soundEnabled) return;
+    try{
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      soundEnabled = true;
+      blip(660,0.06,0.07);
+    }catch(e){}
+  }
+  function blip(freq=600, dur=0.08, vol=0.08, type="sine"){
+    if(!soundEnabled || !audioCtx) return;
+    const t = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t+dur+0.02);
+  }
+  const sFlip = () => blip(740,0.05,0.06);
+  const sMatch = () => blip(980,0.08,0.08);
+  const sMismatch = () => blip(240,0.12,0.08,"triangle");
+  const sBell = () => { blip(1800,0.05,0.06); setTimeout(()=>blip(2200,0.06,0.06),70); };
+  const sWin = () => { blip(523,0.08,0.09); setTimeout(()=>blip(784,0.12,0.10),120); };
+  function evilLaughEcho(){
+    if(!soundEnabled || !audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    osc.type = "sawtooth";
+    const gain = audioCtx.createGain();
+    const delay = audioCtx.createDelay(1.0);
+    const fb = audioCtx.createGain();
+    const wet = audioCtx.createGain();
+    const dry = audioCtx.createGain();
+    delay.delayTime.setValueAtTime(0.18, t0);
+    fb.gain.setValueAtTime(0.45, t0);
+    wet.gain.setValueAtTime(0.35, t0);
+    dry.gain.setValueAtTime(0.55, t0);
+    delay.connect(fb); fb.connect(delay);
+    osc.connect(gain);
+    gain.connect(dry);
+    gain.connect(delay);
+    delay.connect(wet);
+    dry.connect(audioCtx.destination);
+    wet.connect(audioCtx.destination);
+    osc.frequency.setValueAtTime(280, t0);
+    osc.frequency.exponentialRampToValueAtTime(210, t0+0.12);
+    osc.frequency.setValueAtTime(320, t0+0.20);
+    osc.frequency.exponentialRampToValueAtTime(240, t0+0.55);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.12, t0+0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0+0.65);
+    osc.start(t0);
+    osc.stop(t0+0.70);
+  }
+
+  // ---------- GAME STATE ----------
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+
+  let mode = "title"; // title -> dialogue -> walking -> puzzle -> rickshaw -> win/lose
+  let stamina = 1;
+  let walkT = 0;
+
+  let dialogueQueue = [];
+  let dialogueActive = false;
+
+  // Puzzle
+  const FRUITS = [
+    {k:"grape", e:"🍇"},
+    {k:"apple", e:"🍎"},
+    {k:"banana", e:"🍌"},
+    {k:"straw", e:"🍓"},
+    {k:"orange", e:"🍊"},
+    {k:"water", e:"🍉"},
+    {k:"pine", e:"🍍"},
+    {k:"kiwi", e:"🥝"}
+  ];
+  let deck = [];
+  let first = null, second = null;
+  let lock = false;
+  let movesLeft = MOVE_LIMIT;
+  let rickshawUnlocked = false;
+
+  // Road dash animation
+  const dashes = document.getElementById("dashes");
+  let dashX = 0;
+
+  function setDialogue(lines){
+    dialogueQueue = lines.slice();
+    dialogueActive = true;
+    showNextDialogue();
+  }
+  function showNextDialogue(){
+    if(dialogueQueue.length === 0){
+      dialogueActive = false;
+      dialogue.style.display = "none";
+      return;
+    }
+    const cur = dialogueQueue.shift();
+    d1.textContent = cur.a;
+    d2.textContent = cur.b;
+    dialogue.style.display = "block";
+  }
+
+  function resetAll(){
+    mode = "title";
+    stamina = 1;
+    walkT = 0;
+    dashX = 0;
+
+    dialogueQueue = [];
+    dialogueActive = false;
+    dialogue.style.display = "none";
+
+    puzzleOverlay.style.display = "none";
+    rPrompt.style.display = "none";
+    evil.style.display = "none";
+    eyes.style.display = "none";
+    sadithChar.classList.remove("evil");
+
+    deck = [];
+    first = null; second = null;
+    lock = false;
+    movesLeft = MOVE_LIMIT;
+    movesText.textContent = "Moves left: " + movesLeft;
+    rickshawUnlocked = false;
+
+    hint.style.display = "block";
+
+    // initial frames
+    setSpriteFrame(nuriSprite, 0);
+    setSpriteFrame(sadithSprite, 0);
+  }
+
+  function startIntro(){
+    mode = "dialogue";
+    setDialogue([
+      { a:"Nuri: How far is it?", b:"Sadith: Very near 😌" },
+      { a:"Nuri: I don’t want to walk…", b:"Sadith: Okay okay 😅" },
+      { a:"Nuri: Let’s take rickshaw!", b:"Sadith: Only if you win 😈" }
+    ]);
+    // sadith talking frame
+    setSpriteFrame(sadithSprite, 1);
+  }
+
+  // ---------- PUZZLE ----------
+  function shuffle(a){
+    for(let i=a.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [a[i],a[j]]=[a[j],a[i]];
+    }
+    return a;
+  }
+
+  function buildDeck(){
+    const cards=[];
+    for(const f of FRUITS){ cards.push({f},{f}); }
+    shuffle(cards);
+    deck = cards.map((c,i)=>({ id:i, fruit:c.f, up:false, matched:false }));
+  }
+
+  function renderGrid(){
+    grid.innerHTML = "";
+    deck.forEach((card, idx) => {
+      const btn = document.createElement("button");
+      btn.className = "tile";
+      btn.type = "button";
+      btn.dataset.idx = idx;
+      btn.textContent = card.up || card.matched ? card.fruit.e : "❓";
+      if(card.up) btn.classList.add("up");
+      if(card.matched) btn.classList.add("matched");
+      grid.appendChild(btn);
+    });
+  }
+
+  function startPuzzle(){
+    mode = "puzzle";
+    hint.style.display = "none";
+    puzzleOverlay.style.display = "block";
+
+    movesLeft = MOVE_LIMIT;
+    movesText.textContent = "Moves left: " + movesLeft;
+
+    first = null; second = null; lock = false;
+
+    buildDeck();
+    renderGrid();
+
+    // Nuri tired
+    setSpriteFrame(nuriSprite, 1);
+    setSpriteFrame(sadithSprite, 0);
+  }
+
+  function updateTile(idx){
+    const btn = grid.querySelector(`button[data-idx="${idx}"]`);
+    if(!btn) return;
+    const c = deck[idx];
+    btn.textContent = c.up || c.matched ? c.fruit.e : "❓";
+    btn.classList.toggle("up", !!c.up);
+    btn.classList.toggle("matched", !!c.matched);
+  }
+
+  function loseNow(){
+    mode = "lose";
+    puzzleOverlay.style.display = "none";
+    rPrompt.style.display = "none";
+
+    evil.style.display = "block";
+    eyes.style.display = "block";
+    sadithChar.classList.add("evil");
+
+    setSpriteFrame(sadithSprite, 2); // devil happy frame
+    evilLaughEcho();
+
+    setDialogue([
+      { a:"Sadith: Hahaha 😈", b:"" },
+      { a:"Sadith: Now you have to walk.", b:"" }
+    ]);
+  }
+
+  function winNow(){
+    mode = "rickshaw";
+    puzzleOverlay.style.display = "none";
+    rickshawUnlocked = true;
+
+    sBell();
+    rPrompt.style.display = "block";
+
+    // Nuri happy
+    setSpriteFrame(nuriSprite, 2);
+    setSpriteFrame(sadithSprite, 1);
+  }
+
+  grid.addEventListener("click", (e) => {
+    const btn = e.target.closest("button.tile");
+    if(!btn) return;
+    if(mode !== "puzzle") return;
+    if(lock) return;
+
+    const idx = Number(btn.dataset.idx);
+    const c = deck[idx];
+    if(c.matched || c.up) return;
+
+    ensureAudio();
+    sFlip();
+
+    c.up = true;
+    updateTile(idx);
+
+    if(first === null){ first = idx; return; }
+    if(second === null){
+      second = idx;
+      movesLeft -= 1;
+      movesText.textContent = "Moves left: " + movesLeft;
+      lock = true;
+
+      setTimeout(() => {
+        const A = deck[first];
+        const B = deck[second];
+
+        if(A.fruit.k === B.fruit.k){
+          A.matched = true; B.matched = true;
+          A.up = false; B.up = false;
+          updateTile(first); updateTile(second);
+          sMatch();
+
+          if(A.fruit.k === "grape"){
+            stamina = clamp(stamina + GRAPE_BOOST, 0, 1);
+          }
+
+          if(deck.every(x => x.matched)){
+            sWin();
+            winNow();
+          }
+        }else{
+          A.up = false; B.up = false;
+          updateTile(first); updateTile(second);
+          sMismatch();
+          stamina = clamp(stamina - MISMATCH_PENALTY, 0, 1);
+
+          if(stamina <= 0 || movesLeft <= 0){
+            loseNow();
+          }
+        }
+
+        first = null; second = null; lock = false;
+      }, 420);
+    }
+  });
+
+  // ---------- MAIN TAP CONTROL ----------
+  document.addEventListener("pointerdown", () => {
+    ensureAudio();
+
+    if(mode === "title"){
+      startIntro();
+      return;
+    }
+
+    if(dialogueActive){
+      showNextDialogue();
+      // when intro ends, start walking
+      if(!dialogueActive && mode === "dialogue"){
+        mode = "walking";
+        setSpriteFrame(sadithSprite, 0);
+        setSpriteFrame(nuriSprite, 0);
+      }
+      return;
+    }
+
+    if(mode === "rickshaw"){
+      // take rickshaw -> final win dialogue
+      rPrompt.style.display = "none";
+      mode = "win";
+      setDialogue([
+        { a:"Sadith: You won the game!", b:"Now take rickshaw 😌" },
+        { a:"Nuri: Now I’ll go home", b:"and eat goru." }
+      ]);
+      return;
+    }
+
+    if(mode === "win" || mode === "lose"){
+      resetAll();
+      return;
+    }
+  }, {passive:true});
+
+  // ---------- LOOP ----------
+  function loop(){
+    // stamina + road motion only during walking/puzzle/rickshaw/win/lose
+    if(mode === "walking"){
+      walkT += 1/60;
+      stamina = clamp(1 - (walkT / WALK_SECONDS), 0, 1);
+
+      // Nuri gets tired frame when stamina low
+      if(stamina <= 0.40) setSpriteFrame(nuriSprite, 1);
+
+      if(stamina <= START_PUZZLE_AT){
+        // start puzzle once
+        startPuzzle();
+      }
+      if(stamina <= 0){
+        loseNow();
+      }
+    }
+
+    // dash animation (always looks alive)
+    dashX = (dashX - 3) % 98;
+    dashes.style.transform = `translateX(${dashX}px)`;
+
+    // stamina bar
+    barFill.style.width = Math.round(stamina * 100) + "%";
+
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- START ----------
+  resetAll();
+  // show title overlay using dialogue box (simple)
+  dialogue.style.display = "block";
+  d1.textContent = "Tap to start";
+  d2.textContent = "Help Nuri avoid walking 😌";
+  dialogueActive = false;
+  mode = "title";
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
